@@ -8,7 +8,7 @@ export GEMINI_API_KEY=your_key
 vemb text "hello world"
 ```
 
-Powered by Gemini Embedding 2, the first natively multimodal embedding model.
+Powered by [Gemini Embedding 2](https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-embedding-2/), the first natively multimodal embedding model. One model, one vector space for everything.
 
 ## Install
 
@@ -28,12 +28,21 @@ export GEMINI_API_KEY=your_key
 
 ```bash
 vemb text "hello world"                    # embed text
+vemb embed photo.jpg                       # embed any file (auto-detects type)
+vemb embed *.jpg --jsonl                   # batch embed, one JSON per line
 vemb image photo.jpg                       # embed image (PNG, JPEG)
 vemb audio clip.mp3                        # embed audio (MP3, WAV)
 vemb video clip.mp4                        # embed video (MP4, MOV)
 vemb pdf doc.pdf                           # embed PDF
 vemb similar photo1.jpg photo2.jpg         # cosine similarity between two files
 vemb search ./photos "sunset at beach"     # search a directory
+```
+
+Pipe from stdin:
+
+```bash
+echo "hello world" | vemb text -
+cat document.txt | vemb text -
 ```
 
 ## Output
@@ -51,10 +60,16 @@ Default output is JSON:
 Options:
 
 ```bash
-vemb text "hello" --compact          # just the vector array
-vemb text "hello" --numpy            # numpy format
-vemb text "hello" --dim 768          # set dimensions (128-3072)
+vemb text "hello" --compact                # just the vector array
+vemb text "hello" --numpy                  # numpy format
+vemb text "hello" --dim 768                # set dimensions (128-3072)
 vemb text "hello" --task RETRIEVAL_QUERY   # set task type
+```
+
+Batch mode outputs JSONL (one embedding per line):
+
+```bash
+vemb embed *.jpg --jsonl > embeddings.jsonl
 ```
 
 ## Search
@@ -66,6 +81,16 @@ vemb search ./photos "sunset at beach" --top 5
 ```
 
 Embeddings are cached in `.vemb/cache.json` inside the searched directory. Unchanged files won't be re-embedded on subsequent searches.
+
+## Supported formats
+
+| Type | Formats |
+|------|---------|
+| Text | any string, stdin |
+| Image | PNG, JPEG |
+| Audio | MP3, WAV (up to 80s) |
+| Video | MP4, MOV (up to 128s) |
+| PDF | up to 6 pages |
 
 ## License
 

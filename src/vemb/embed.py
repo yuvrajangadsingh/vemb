@@ -42,7 +42,7 @@ def guess_mime(filepath):
 
 def _build_config(dim=None, task_type=None):
     kwargs = {}
-    if dim:
+    if dim is not None:
         kwargs["output_dimensionality"] = dim
     if task_type:
         kwargs["task_type"] = task_type
@@ -82,10 +82,11 @@ def cosine_similarity(a, b):
     return dot / (norm_a * norm_b)
 
 
-def cache_key(filepath):
+def cache_key(filepath, base_dir=None):
     p = Path(filepath)
     stat = p.stat()
-    return f"{p.name}:{stat.st_size}:{stat.st_mtime_ns}"
+    rel = str(p.relative_to(base_dir)) if base_dir else str(p)
+    return f"{rel}:{stat.st_size}:{stat.st_mtime_ns}"
 
 
 def load_cache(directory, dim):
