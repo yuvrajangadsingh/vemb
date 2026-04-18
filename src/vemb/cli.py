@@ -9,6 +9,7 @@ from vemb.embed import (
     embed_text,
     embed_file,
     cosine_similarity,
+    cosine_similarity_batch,
     scan_supported_files,
     load_cache,
     save_cache,
@@ -167,10 +168,10 @@ def search(directory, query, dim, top, no_cache):
     cache = {} if no_cache else load_cache(directory, dim)
     query_emb = _call_embed_text(query, dim=dim, task_type="RETRIEVAL_QUERY")
 
-    results = []
     new_cache = dict(cache)
     uncached = sum(1 for f in files if cache_key(f, base) not in cache)
 
+    vectors = []
     embedded = 0
     for f in files:
         key = cache_key(f, base)
@@ -182,8 +183,7 @@ def search(directory, query, dim, top, no_cache):
             emb = _call_embed_file(str(f), dim=dim, task_type="RETRIEVAL_DOCUMENT")
             values = list(emb.values)
             new_cache[key] = {"file": str(f), "values": values}
-        score = cosine_similarity(query_emb.values, values)
-        results.append((score, f))
+        vectors.append(values)
 
     if embedded:
         print(" " * 40, end="\r", file=sys.stderr)
@@ -191,7 +191,8 @@ def search(directory, query, dim, top, no_cache):
     if not no_cache:
         save_cache(directory, dim, new_cache)
 
-    results.sort(key=lambda x: x[0], reverse=True)
+    scores = cosine_similarity_batch(query_emb.values, vectors)
+    results = sorted(zip(scores.tolist(), files), key=lambda x: x[0], reverse=True)
     for score, f in results[:top]:
         if score >= 0.8:
             color = GREEN

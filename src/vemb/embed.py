@@ -5,6 +5,7 @@ import os
 import sys
 from pathlib import Path
 
+import numpy as np
 from google import genai
 from google.genai import types
 
@@ -80,6 +81,19 @@ def cosine_similarity(a, b):
     if norm_a == 0 or norm_b == 0:
         return 0.0
     return dot / (norm_a * norm_b)
+
+
+def cosine_similarity_batch(query, matrix):
+    q = np.asarray(query, dtype=np.float32)
+    m = np.asarray(matrix, dtype=np.float32)
+    if m.ndim != 2 or q.ndim != 1 or m.shape[1] != q.shape[0]:
+        raise ValueError(f"shape mismatch: query {q.shape}, matrix {m.shape}")
+    q_norm = float(np.linalg.norm(q))
+    if q_norm == 0:
+        return np.zeros(m.shape[0], dtype=np.float32)
+    m_norms = np.linalg.norm(m, axis=1)
+    m_norms = np.where(m_norms == 0, 1.0, m_norms).astype(np.float32)
+    return (m @ q) / (m_norms * q_norm)
 
 
 def cache_key(filepath, base_dir=None):
