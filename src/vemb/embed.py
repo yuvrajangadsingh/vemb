@@ -89,24 +89,105 @@ def cache_key(filepath, base_dir=None):
     return f"{rel}:{stat.st_size}:{stat.st_mtime_ns}"
 
 
-def load_cache(directory, dim):
-    cache_path = Path(directory) / ".vemb" / "cache.json"
-    if not cache_path.exists():
-        return {}
-    try:
-        data = json.loads(cache_path.read_text())
-        if data.get("model") != MODEL or data.get("dim") != dim:
-            return {}
-        return data.get("entries", {})
-    except (json.JSONDecodeError, KeyError):
-        return {}
+CACHE_VERSION = 2
 
 
-def save_cache(directory, dim, entries):
+def _cache_paths(directory):
     cache_dir = Path(directory) / ".vemb"
+    return cache_dir, cache_dir / "manifest.json", cache_dir / "vectors.npy"
+
+
+def _normalize_rows_inplace(matrix):
+    import numpy as np
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1.0, norms)
+    np.divide(matrix, norms, out=matrix)
+
+
+def _migrate_legacy_cache(directory, dim):
+    cache_dir, manifest_path, vectors_path = _cache_paths(directory)
+    legacy = cache_dir / "cache.json"
+    if manifest_path.exists() or not legacy.exists():
+        return
+    try:
+        data = json.loads(legacy.read_text())
+    except (json.JSONDecodeError, OSError):
+        return
+    if data.get("model") != MODEL or data.get("dim") != dim:
+        return
+    entries = data.get("entries") or {}
+    if not entries:
+        return
+    import numpy as np
+    first_values = next(iter(entries.values()))["values"]
+    D = len(first_values)
+    N = len(entries)
+    matrix = np.empty((N, D), dtype=np.float32)
+    keys = {}
+    for i, (k, v) in enumerate(entries.items()):
+        matrix[i] = np.asarray(v["values"], dtype=np.float32)
+        keys[k] = i
+    _normalize_rows_inplace(matrix)
     cache_dir.mkdir(exist_ok=True)
-    data = {"version": 1, "model": MODEL, "dim": dim, "entries": entries}
-    (cache_dir / "cache.json").write_text(json.dumps(data))
+    np.save(vectors_path, matrix, allow_pickle=False)
+    manifest = {
+        "version": CACHE_VERSION,
+        "model": MODEL,
+        "dim": dim,
+        "normalized": True,
+        "keys": keys,
+    }
+    manifest_path.write_text(json.dumps(manifest))
+    legacy.unlink()
+    print(f"  Migrated cache to binary format ({N} vectors, {D} dim).", file=sys.stderr)
+
+
+def load_cache(directory, dim):
+    _migrate_legacy_cache(directory, dim)
+    cache_dir, manifest_path, vectors_path = _cache_paths(directory)
+    if not manifest_path.exists() or not vectors_path.exists():
+        return {}, None
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}, None
+    if (
+        manifest.get("model") != MODEL
+        or manifest.get("dim") != dim
+        or manifest.get("version") != CACHE_VERSION
+    ):
+        return {}, None
+    import numpy as np
+    try:
+        matrix = np.load(vectors_path, mmap_mode=None, allow_pickle=False)
+    except (ValueError, OSError):
+        return {}, None
+    if matrix.dtype != np.float32 or matrix.ndim != 2 or matrix.shape[1] != dim:
+        return {}, None
+    keys = manifest.get("keys") or {}
+    return keys, matrix
+
+
+def save_cache(directory, dim, keys, matrix):
+    import numpy as np
+    cache_dir, manifest_path, vectors_path = _cache_paths(directory)
+    cache_dir.mkdir(exist_ok=True)
+    if matrix.dtype != np.float32:
+        matrix = matrix.astype(np.float32)
+    tmp_vectors = vectors_path.with_name(vectors_path.name + ".tmp")
+    with open(tmp_vectors, "wb") as f:
+        np.save(f, matrix, allow_pickle=False)
+    tmp_vectors.replace(vectors_path)
+    manifest = {
+        "version": CACHE_VERSION,
+        "model": MODEL,
+        "dim": dim,
+        "normalized": True,
+        "keys": keys,
+    }
+    tmp_manifest = manifest_path.with_suffix(".json.tmp")
+    tmp_manifest.write_text(json.dumps(manifest))
+    tmp_manifest.replace(manifest_path)
 
 
 def scan_supported_files(directory):

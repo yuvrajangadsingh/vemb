@@ -159,39 +159,55 @@ def similar(file1, file2, dim):
 @click.option("--no-cache", is_flag=True, help="Skip cache")
 def search(directory, query, dim, top, no_cache):
     """Search a directory for files similar to a query."""
+    import numpy as np
+
     files = scan_supported_files(directory)
     if not files:
         raise click.ClickException("no supported files found in directory")
 
     base = Path(directory)
-    cache = {} if no_cache else load_cache(directory, dim)
-    query_emb = _call_embed_text(query, dim=dim, task_type="RETRIEVAL_QUERY")
+    keys, cache_matrix = ({}, None) if no_cache else load_cache(directory, dim)
 
-    results = []
-    new_cache = dict(cache)
-    uncached = sum(1 for f in files if cache_key(f, base) not in cache)
+    query_emb = _call_embed_text(query, dim=dim, task_type="RETRIEVAL_QUERY")
+    query_vec = np.asarray(query_emb.values, dtype=np.float32)
+    qnorm = float(np.linalg.norm(query_vec))
+    if qnorm > 0:
+        query_vec = query_vec / qnorm
+
+    D = int(cache_matrix.shape[1]) if cache_matrix is not None else query_vec.shape[0]
+    working = np.empty((len(files), D), dtype=np.float32)
+    new_keys = dict(keys)
+    new_rows = []
+    uncached = sum(1 for f in files if cache_key(f, base) not in keys)
 
     embedded = 0
-    for f in files:
-        key = cache_key(f, base)
-        if key in cache:
-            values = cache[key]["values"]
-        else:
-            embedded += 1
-            print(f"  Embedding {embedded}/{uncached}...", end="\r", file=sys.stderr)
-            emb = _call_embed_file(str(f), dim=dim, task_type="RETRIEVAL_DOCUMENT")
-            values = list(emb.values)
-            new_cache[key] = {"file": str(f), "values": values}
-        score = cosine_similarity(query_emb.values, values)
-        results.append((score, f))
+    for i, f in enumerate(files):
+        k = cache_key(f, base)
+        if k in keys and cache_matrix is not None:
+            working[i] = cache_matrix[keys[k]]
+            continue
+        embedded += 1
+        print(f"  Embedding {embedded}/{uncached}...", end="\r", file=sys.stderr)
+        emb = _call_embed_file(str(f), dim=dim, task_type="RETRIEVAL_DOCUMENT")
+        vec = np.asarray(emb.values, dtype=np.float32)
+        vnorm = float(np.linalg.norm(vec))
+        if vnorm > 0:
+            vec = vec / vnorm
+        working[i] = vec
+        base_rows = cache_matrix.shape[0] if cache_matrix is not None else 0
+        new_keys[k] = base_rows + len(new_rows)
+        new_rows.append(vec)
 
     if embedded:
         print(" " * 40, end="\r", file=sys.stderr)
 
-    if not no_cache:
-        save_cache(directory, dim, new_cache)
+    if not no_cache and new_rows:
+        new_block = np.stack(new_rows).astype(np.float32, copy=False)
+        updated = new_block if cache_matrix is None else np.vstack([cache_matrix, new_block])
+        save_cache(directory, dim, new_keys, updated)
 
-    results.sort(key=lambda x: x[0], reverse=True)
+    scores = (working @ query_vec).tolist()
+    results = sorted(zip(scores, files), key=lambda x: x[0], reverse=True)
     for score, f in results[:top]:
         if score >= 0.8:
             color = GREEN
