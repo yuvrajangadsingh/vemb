@@ -84,7 +84,9 @@ Search indexes a directory and finds files similar to your query:
 vemb search ./photos "sunset at beach" --top 5
 ```
 
-Embeddings are cached in `.vemb/cache.json` inside the searched directory. Unchanged files won't be re-embedded on subsequent searches.
+Embeddings are cached as a binary `numpy` matrix in `.vemb/vectors.npy` with a lightweight `.vemb/manifest.json` mapping keys to row indices. Vectors are pre-normalized so cosine reduces to a dot product at query time. Unchanged files won't be re-embedded on subsequent searches.
+
+Legacy `.vemb/cache.json` caches (from v0.2.0 and earlier) are migrated to the binary format automatically on first load.
 
 ## Supported formats
 
